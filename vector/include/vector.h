@@ -25,16 +25,7 @@ namespace no_std {
             }
         }
 
-        Vector(std::size_t count,
-               const T& value,
-               const Alloc& alloc = Alloc()): allocator(alloc) {
-            reserve(count);
-            for (std::size_t i = 0; i < count; i++) {
-                alloc.construct(data_ptr + i, value);
-            }
-        }
-
-        explicit Vector(u32 capacity,
+        explicit Vector(std::size_t capacity,
                         const T& new_entry = T(),
                         const Alloc& alloc = Alloc()):
             capacity(capacity),
@@ -46,7 +37,7 @@ namespace no_std {
             }
         }
 
-        Vector(Vector<T>&& old)  noexcept {
+        Vector(Vector<T>&& old) noexcept {
             if (&old == data_ptr) {
                 return;
             }
@@ -70,7 +61,7 @@ namespace no_std {
                 data_ptr[i] = old.data_ptr[i];
             }
         }
-        Vector<T>& operator=(Vector<T>&& old)  noexcept {
+        Vector<T>& operator=(Vector<T>&& old) noexcept {
             if (&old == this) {
                 return *this;
             }

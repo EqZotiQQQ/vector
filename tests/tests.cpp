@@ -9,13 +9,13 @@ TEST(basic_operation, constructor_empty) {
     Vector<int> v;
     ASSERT_NE(&v, nullptr);
 }
-//
-//TEST(basic_operation, constructor_non_empty) {
-//    std::size_t f = 5;
-//    int s = 2;
-//    Vector<int> v{f, s};
-//    ASSERT_NE(&v, nullptr);
-//}
+
+TEST(basic_operation, constructor_non_empty) {
+    std::size_t f = 5;
+    int s = 2;
+    Vector<int> v(f, s);
+    ASSERT_NE(&v, nullptr);
+}
 
 TEST(basic_operation, move_constructor) {
     Vector<int> v1;
