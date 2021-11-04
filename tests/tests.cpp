@@ -2,6 +2,7 @@
 
 #include <vector.h>
 #include <iostream>
+#include <limits>
 
 using namespace no_std;
 
@@ -15,6 +16,19 @@ TEST(basic_operation, constructor_non_empty) {
     int s = 2;
     Vector<int> v(f, s);
     ASSERT_NE(&v, nullptr);
+}
+
+TEST(basic_operation, constructor_non_empty_bad_alloc) {
+    std::size_t i64_max = std::numeric_limits<i64>::max();
+    int s = 2;
+    EXPECT_THROW({
+                     try {
+                         Vector<int> v(i64_max, s);
+                     } catch (const std::bad_alloc &e) {
+                         EXPECT_STREQ("std::bad_alloc", e.what());
+                         throw;
+                     }
+                 }, std::bad_alloc);
 }
 
 TEST(basic_operation, move_constructor) {
