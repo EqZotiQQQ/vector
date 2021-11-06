@@ -133,11 +133,9 @@ namespace no_std {
                 allocator.construct(std::forward<Args>(args)...);
             } catch (...) {
                 for (std::size_t j = 0; j < size; j++) {
-                    allocator.destroy(data_ptr + size);
-//                    (data_ptr + size)->~T();
+                    AllocTraits::destroy(allocator, data_ptr + size);
                 }
                 allocator.deallocate(data_ptr);
-//                delete[] reinterpret_cast<char*>(data_ptr);
                 throw;
             }
             size += 1;
@@ -150,18 +148,17 @@ namespace no_std {
             T* new_storage = AllocTraits::allocate(allocator, new_capacity);
 
             try {
-//                std::uninitialized_copy(data_ptr, data_ptr + size, new_storage);
                 std::uninitialized_move(data_ptr, data_ptr + size, new_storage);
             } catch (...) {
-                allocator.deallocate(new_storage, new_capacity);
+                AllocTraits::deallocate(allocator, new_storage, new_capacity);
                 throw;
             }
 
             for (std::size_t i = 0; i < size; i++) {
-                allocator.destroy(data_ptr + i);
+                AllocTraits::destroy(allocator, data_ptr + i);
             }
 
-            allocator.deallocate(data_ptr, size);
+            AllocTraits::deallocate(allocator, data_ptr, size);
             data_ptr = new_storage;
             capacity = new_capacity;
         }
@@ -172,17 +169,22 @@ namespace no_std {
                 std::size_t i = 0;
                 try {
                     for (; i < size; i++) {
-                        new(data_ptr + i) T(data_ptr[i]);
+                        AllocTraits::construct(allocator, data_ptr, data_ptr[i]);
+//                        new(data_ptr + i) T(data_ptr[i]);
                     }
                 } catch (...) {
                     for (std::size_t j = 0; j < i; j++) {
-                        (data_ptr + i)->~T();
+                        AllocTraits::destroy(allocator, data_ptr + i);
+//                        (data_ptr + i)->~T();
                     }
-                    delete[] reinterpret_cast<char*>(data_ptr);
+                    AllocTraits::deallocate(allocator, data_ptr, size);
                     throw;
                 }
             } else if (new_size < size) {
                 size -= new_size;
+                for (std::size_t i = new_size; i < size; i++) {
+                    AllocTraits::destroy(allocator, data_ptr + i);
+                }
             }
         }
 
