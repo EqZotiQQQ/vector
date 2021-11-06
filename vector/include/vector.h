@@ -15,52 +15,71 @@ namespace no_std {
     template<class T, typename Alloc = std::allocator<T>>
     class Vector {
     public:
-        Vector(const T& new_entry = T(), const Alloc& alloc = Alloc()):
+    protected:
+        T* data_ptr {nullptr};
+        std::size_t size {0};
+        std::size_t capacity {0};
+
+        Alloc allocator;
+
+        using AllocTraits = std::allocator_traits<Alloc>;
+
+        static constexpr f32 capacity_multiplier {2.0}; // 2.0 std, fibonaccy for apple
+        static constexpr std::size_t default_capacity {4};
+
+    public:
+        constexpr Vector(const T& new_entry = T(), const Alloc& alloc = Alloc()):
                 allocator(alloc) {
             reserve(default_capacity);
         }
 
-        constexpr explicit Vector(std::size_t new_capacity,
+        constexpr explicit Vector(std::size_t new_size,
                         const T& new_entry = T(),
                         const Alloc& alloc = Alloc()):
-                capacity(new_capacity),
                 allocator(alloc)
         {
-            data_ptr = allocator.allocate(capacity);
-            for (int i = 0; i < capacity; i++) {
-                new(data_ptr + i) T(new_entry);
+//            default_capacity > capacity && reserve(default_capacity) || reserve((new_size / 256) * 512);// make reserve ret ->bool
+
+            if (default_capacity >= new_size) {
+                reserve(default_capacity);
+            } else {
+                reserve(new_size);
+            }
+
+            size = new_size;
+
+            for (std::size_t i = 0; i < size; i++) {
+                AllocTraits::construct(allocator, data_ptr + i, new_entry);
             }
         }
 
-        Vector(Vector<T>&& old) noexcept {
+        constexpr Vector(Vector<T>&& old) noexcept {
             if (&old == data_ptr) {
                 return;
             }
-            delete[] data_ptr;
-            data_ptr = old.data_ptr;
-            size = old.size;
-            capacity = old.capacity;
-            old.data_ptr = nullptr;
-            old.size = 0;
-            old.capacity = 0;
+            AllocTraits::deallocate(allocator, data_ptr, size);
+            std::swap(data_ptr, old.data_ptr);
+            std::swap(size, old.size);
+            std::swap(capacity, old.capacity);
         }
-        Vector(const Vector<T>& old) {
+
+        constexpr Vector(const Vector<T>& old) {
             if (&old == this) {
                 return;
             }
-            delete[] data_ptr;
-            data_ptr = new T[old.size];
+            AllocTraits::deallocate(allocator, data_ptr, size);
+            data_ptr = allocator.allocate(old.capacity);
             size = old.size;
             capacity = old.capacity;
-            for (unsigned i = 0; i < size; i++) {
-                data_ptr[i] = old.data_ptr[i];
-            }
+            std::copy(old.data_ptr, old.data_ptr + old.size, data_ptr);
         }
-        Vector<T>& operator=(Vector<T>&& old) noexcept {
+
+        constexpr Vector<T>& operator=(Vector<T>&& old) noexcept {
             if (&old == this) {
                 return *this;
             }
-            delete[] data_ptr;
+            AllocTraits::deallocate(allocator, data_ptr, size);
+
             data_ptr = nullptr;
             capacity = 0;
             size = 0;
@@ -70,11 +89,12 @@ namespace no_std {
             std::exchange(capacity, old.capacity);
             return *this;
         }
-        Vector<T>& operator=(const Vector<T>& old) {
+
+        constexpr Vector<T>& operator=(const Vector<T>& old) {
             if (&old == this) {
                 return *this;
             }
-            delete[] data_ptr;
+            AllocTraits::deallocate(allocator, data_ptr, size);
 
             data_ptr = new T[old.size];
             size = old.size;
@@ -83,50 +103,55 @@ namespace no_std {
             }
             return *this;
         }
+
         ~Vector() {
-            delete[] data_ptr;
+            for (std::size_t i = 0; i < size; i++) {
+                AllocTraits::destroy(allocator, data_ptr + i);
+            }
+            AllocTraits::deallocate(allocator, data_ptr, size);
         }
-        T* operator&() {
+
+        constexpr T* operator&() {
             return data_ptr;
         }
-        T& operator*() {
+
+        constexpr T& operator*() {
             return *data_ptr;
         }
 
         template <class... Args>
-        void push_back(Args... a) {
+        constexpr void push_back(Args... a) {
             (push_back_impl(a), ...);
         }
 
         template <class... Args>
-        void push_front(Args... args) {
-            u32 shift = sizeof ... (args);
-            if (size + shift > capacity) {
-                reserve(capacity + shift + size);
+        constexpr void emplace_back(Args&&... args) {
+            if (size == capacity) {
+                reserve(capacity * capacity_multiplier);
             }
-            (push_back_impl(args),...);
-            ring_shift(shift);
+            try {
+                allocator.construct(std::forward<Args>(args)...);
+            } catch (...) {
+                for (std::size_t j = 0; j < size; j++) {
+                    allocator.destroy(data_ptr + size);
+//                    (data_ptr + size)->~T();
+                }
+                allocator.deallocate(data_ptr);
+//                delete[] reinterpret_cast<char*>(data_ptr);
+                throw;
+            }
+            size += 1;
         }
 
-        void ring_shift(std::size_t shift) {
-            for (int i = size-1; i >= 0; i--) {
-                data_ptr[i + shift] = data_ptr[i];
-            }
-            for (int i = 0; i < shift; i++) {
-                data_ptr[i] = data_ptr[i + size];
-            }
-        }
-
-        //todo: if move noexcept then move othervice copy and clear old storage
-        // or i can create subarray and copy it in front of data_ptr...
-        // std::addressof(*iter) вызывается в uni copy потому что он может не иметь перегруженного оператора *
-        constexpr void reserve(std::size_t new_capacity) noexcept {
+        constexpr void reserve(std::size_t new_capacity) {
             if (capacity >= new_capacity) {
                 return;
             }
-            T* new_storage = allocator.allocate(new_capacity);
+            T* new_storage = AllocTraits::allocate(allocator, new_capacity);
+
             try {
-                std::uninitialized_copy(data_ptr, data_ptr + size, new_storage);
+//                std::uninitialized_copy(data_ptr, data_ptr + size, new_storage);
+                std::uninitialized_move(data_ptr, data_ptr + size, new_storage);
             } catch (...) {
                 allocator.deallocate(new_storage, new_capacity);
                 throw;
@@ -141,7 +166,7 @@ namespace no_std {
             capacity = new_capacity;
         }
 
-        void resize(u32 new_size, const T& value = T()) {
+        constexpr void resize(std::size_t new_size, const T& value = T()) {
             if (new_size > size) {
                 reserve(new_size);
                 std::size_t i = 0;
@@ -161,27 +186,15 @@ namespace no_std {
             }
         }
 
-        friend std::ostream& operator<<(std::ostream& os, no_std::Vector<T> v) noexcept {
-            os << "addr = " << &v;
-            os << "\tsize = " << v.size;
-            os << "\tcapacity = " << v.capacity;
-            os << "\tdata = [ ";
-            for (std::size_t i = 0; i < v.size; i++) {
-                os << v.data_ptr[i] << " ";
-            }
-            os << "]\n";
-            return os;
-        }
-
-        T& operator[](std::size_t pos) noexcept {
+        constexpr T& operator[](std::size_t pos) noexcept {
             return data_ptr[pos];
         }
 
-        const T& operator[](std::size_t pos) const noexcept {
+        constexpr const T& operator[](std::size_t pos) const noexcept {
             return data_ptr[pos];
         }
 
-        T& at(std::size_t pos) {
+        constexpr T& at(std::size_t pos) {
             if (pos >= size) {
                 throw std::out_of_range("");
             }
@@ -201,44 +214,36 @@ namespace no_std {
             size -= 1;
         }
 
-        constexpr void pop_front(const T& value = T()) {
-            for (std::size_t i = 0; i < size - 1; i++) {
-                data_ptr[i] = data_ptr[i + 1];
-            }
-            size -= 1;
-            data_ptr[size] = value;
-        }
-
         //void srink_to_fit();
+
+        constexpr friend std::ostream& operator<<(std::ostream& os, no_std::Vector<T> v) noexcept {
+            os << "addr = " << &v;
+            os << "\tsize = " << v.size;
+            os << "\tcapacity = " << v.capacity;
+            os << "\tdata = [ ";
+            for (std::size_t i = 0; i < v.size; i++) {
+                os << v.data_ptr[i] << " ";
+            }
+            os << "]\n";
+            return os;
+        }
 
     protected:
         void push_back_impl(const T& new_entry) {
             if (size == capacity) {
                 reserve(capacity * capacity_multiplier);
             }
-
-            std::size_t i = size;
             try {
                 new(data_ptr + size) T(new_entry);
-                size += 1;
             } catch (...) {
-                size -= 1;
-                for (std::size_t j = 0; j < i; j++) {
-                    (data_ptr + i)->~T();
+                for (std::size_t j = 0; j < size; j++) {
+                    (data_ptr + size)->~T();
                 }
                 delete[] reinterpret_cast<char*>(data_ptr);
                 throw;
             }
+            size += 1;
         }
 
-    protected:
-        T* data_ptr {nullptr};
-        std::size_t size {0};
-        std::size_t capacity {0};
-
-        Alloc allocator;
-
-        static constexpr f32 capacity_multiplier {2.0}; // 2.0 std, fibonaccy for apple
-        static constexpr std::size_t default_capacity {4};
     };
 }
