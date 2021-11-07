@@ -28,7 +28,7 @@ namespace no_std {
         static constexpr std::size_t default_capacity {4};
 
     public:
-        constexpr Vector(const T& new_entry = T(), const Alloc& alloc = Alloc()):
+        constexpr Vector(const Alloc& alloc = Alloc()):
                 allocator(alloc) {
             reserve(default_capacity);
         }
@@ -119,9 +119,20 @@ namespace no_std {
             return *data_ptr;
         }
 
-        template <class... Args>
-        constexpr void push_back(Args... a) {
-            (push_back_impl(a), ...);
+        constexpr void push_back(const T& new_entry) {
+            emplace_back(new_entry);
+            /*if (size == capacity) {
+                reserve(capacity * capacity_multiplier);
+            }
+            try {
+                AllocTraits::construct(allocator, data_ptr + size, new_entry);
+            } catch (...) {
+                for (std::size_t j = 0; j < size; j++) {
+                    AllocTraits::destroy(allocator, data_ptr + size);
+                }
+                throw;
+            }
+            size += 1;*/
         }
 
         template <class... Args>
@@ -130,12 +141,13 @@ namespace no_std {
                 reserve(capacity * capacity_multiplier);
             }
             try {
-                allocator.construct(std::forward<Args>(args)...);
+                AllocTraits::construct(allocator, data_ptr + size, std::forward<Args>(args)...);
+//                allocator.construct(std::forward<Args>(args)...);
             } catch (...) {
                 for (std::size_t j = 0; j < size; j++) {
                     AllocTraits::destroy(allocator, data_ptr + size);
                 }
-                allocator.deallocate(data_ptr);
+                AllocTraits::deallocate(allocator, data_ptr, size);
                 throw;
             }
             size += 1;
@@ -145,11 +157,23 @@ namespace no_std {
             if (capacity >= new_capacity) {
                 return;
             }
+//            if (new_capacity > std::numeric_limits<unsigned int>().max()) {
+//                throw std::runtime_error("Out of memory");
+//            }
             T* new_storage = AllocTraits::allocate(allocator, new_capacity);
-
+            std::size_t i {};
             try {
-                std::uninitialized_move(data_ptr, data_ptr + size, new_storage);
+                for (; i < size; i++) {
+                    // const T& - rvalue can be bind to const T&
+                    // std::conditional<noexcept(T(std::move(T()))), T&&, const T&> move_if_noexcept(T& t) noexcept {}
+                    // ссылка и переменная в целом не отличимы, разве что, decltype может различить их
+                    AllocTraits::construct(allocator, new_storage + i, std::move_if_noexcept(data_ptr[i]));
+                }
+//                std::uninitialized_move(data_ptr, data_ptr + size, new_storage);
             } catch (...) {
+                for (std::size_t j = 0; j < i; j++) {
+                    AllocTraits::destroy(allocator, new_storage + j);
+                }
                 AllocTraits::deallocate(allocator, new_storage, new_capacity);
                 throw;
             }
@@ -212,7 +236,7 @@ namespace no_std {
         }
 
         constexpr void pop_back() noexcept {
-            (data_ptr + size)->~T();
+            AllocTraits::destroy(allocator, data_ptr + size);
             size -= 1;
         }
 
@@ -229,23 +253,5 @@ namespace no_std {
             os << "]\n";
             return os;
         }
-
-    protected:
-        void push_back_impl(const T& new_entry) {
-            if (size == capacity) {
-                reserve(capacity * capacity_multiplier);
-            }
-            try {
-                new(data_ptr + size) T(new_entry);
-            } catch (...) {
-                for (std::size_t j = 0; j < size; j++) {
-                    (data_ptr + size)->~T();
-                }
-                delete[] reinterpret_cast<char*>(data_ptr);
-                throw;
-            }
-            size += 1;
-        }
-
     };
 }
